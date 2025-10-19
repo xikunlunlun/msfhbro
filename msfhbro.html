@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>下载页</title>
+    <style>
+        body, html { 
+            margin: 0; 
+            padding: 20px; 
+            height: 100vh; 
+            overflow: hidden; 
+            box-sizing: border-box; /* 避免内边距撑大页面 */
+        }
+        iframe { 
+            width: 100%; 
+            height: 100%; 
+            border: 1px solid #eee; /* 加边框，明确iframe区域 */
+            border-radius: 4px;
+        }
+        .error { 
+            color: #f43f5e; 
+            font-size: 16px; 
+            text-align: center; 
+            margin-top: 50px; 
+        }
+    </style>
+</head>
+<body>
+    <iframe id="embeddedPage" src="about:blank"></iframe> <!-- 初始空白，避免加载闪烁 -->
+    <script>
+        // 1. 封装参数获取+错误提示（更清晰）
+        function getQueryParam(param) {
+            const params = new URLSearchParams(window.location.search);
+            const value = params.get(param);
+            if (!value) {
+                document.body.innerHTML = '<div class="error">错误：URL中缺少必要参数「y」（Base64编码的目标地址）</div>';
+                throw new Error('Missing required param "y"'); // 终止后续代码
+            }
+            return value;
+        }
+
+        // 2. 强化Base64解码（兼容HTTP场景下的编码格式）
+        function decodeBase64Url(encodedUrl) {
+            try {
+                // 先处理URL安全编码，再补全Base64缺失的等号（避免解码失败）
+                const safeEncoded = encodedUrl.replace(/-/g, '+').replace(/_/g, '/');
+                const paddedEncoded = safeEncoded.padEnd(safeEncoded.length + (4 - safeEncoded.length % 4) % 4, '=');
+                // 解码+处理URI（适配HTTP地址中的特殊字符，如&、?）
+                return decodeURIComponent(atob(paddedEncoded));
+            } catch (err) {
+                document.body.innerHTML = '<div class="error">错误：参数「y」的Base64编码格式无效，请检查</div>';
+                throw new Error('Invalid Base64 encoding: ' + err.message);
+            }
+        }
+
+        // 3. 核心逻辑（分步骤执行，便于排查）
+        try {
+            const encodedUrl = getQueryParam('y'); // 获取参数（缺参数直接提示）
+            const decodedUrl = decodeBase64Url(encodedUrl); // 解码（格式错直接提示）
+
+            // 4. 适配HTTP：强制目标地址为HTTP/HTTPS（避免协议异常）
+            if (!decodedUrl.startsWith('http://') && !decodedUrl.startsWith('https://')) {
+                document.body.innerHTML = '<div class="error">错误：解码后的地址必须是HTTP/HTTPS链接</div>';
+                throw new Error('Target URL must start with http/https');
+            }
+
+            // 5. 加载iframe+获取标题（保留原功能，增加错误捕获）
+            const iframe = document.getElementById('embeddedPage');
+            iframe.src = decodedUrl;
+
+            // 6. 优化标题请求（兼容HTTP环境下的proxy.php，增加超时+错误处理）
+            fetch(`proxy.php?url=${encodeURIComponent(decodedUrl)}`, {
+                method: 'GET',
+                timeout: 5000, // 5秒超时，避免卡页面
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' } // 适配HTTP接口
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`接口请求失败（状态码：${res.status}）`);
+                return res.json();
+            })
+            .then(data => document.title = data.title || '下载页')
+            .catch(err => {
+                console.log('获取标题失败（不影响页面加载）：', err);
+                document.title = '下载页'; // 不阻断核心功能
+            });
+
+        } catch (err) {
+            console.log('页面初始化失败：', err);
+        }
+    </script>
+</body>
+</html>
